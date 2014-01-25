@@ -1,0 +1,329 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+namespace ThemeParkResourceViewer
+{
+	class SpriteViewer
+	{
+		public const int TileSize = 32;
+
+		public static SpriteTab[] GetSpriteTabs(string filename)
+		{
+			List<SpriteTab> list = new List<SpriteTab>();
+			using (BinaryReader reader = new BinaryReader(File.OpenRead(filename)))
+			{
+				long length = reader.BaseStream.Length;
+				while (reader.BaseStream.Position != length)
+				{
+					SpriteTab tab = new SpriteTab
+					{
+						Offset = reader.ReadUInt32(),
+						Width = reader.ReadByte(),
+						Height = reader.ReadByte()
+					};
+					list.Add(tab);
+				}
+			}
+			return list.ToArray();
+		}
+
+		public static ushort[] GetSpriteAnims(string filename)
+		{
+			List<ushort> list = new List<ushort>();
+			using (BinaryReader reader = new BinaryReader(File.OpenRead(filename)))
+			{
+				long length = reader.BaseStream.Length;
+				while (reader.BaseStream.Position != length)
+				{
+					ushort indexes = reader.ReadUInt16();
+					list.Add(indexes);
+				}
+			}
+			return list.ToArray();
+		}
+
+		public static byte[] GetSpriteData(string filename)
+		{
+			switch (Path.GetFileNameWithoutExtension(filename))
+			{
+				case "TAKOVER":
+					return ReadBytes(26, 64000);
+
+				case "BUSTED":
+					return ReadBytes(25, 64000);
+
+				default:
+					return File.ReadAllBytes(filename);
+			}
+
+			byte[] ReadBytes(int offset, int count)
+			{
+				using (var fileStream = File.OpenRead(filename))
+				{
+					byte[] data = new byte[count];
+					fileStream.Seek(offset, SeekOrigin.Current);
+					fileStream.Read(data, 0, count);
+					return data;
+				}
+			}
+		}
+
+		public static bool IsRNCCompressed(string filename)
+		{
+			using (FileStream fs = File.OpenRead(filename))
+			{
+				return fs.Length >= 3 && fs.ReadByte() == 'R' && fs.ReadByte() == 'N' && fs.ReadByte() == 'C';
+			}
+		}
+
+		public static uint[] GetPalette(string filename)
+		{
+			List<uint> list = new List<uint>();
+			using (BinaryReader reader = new BinaryReader(File.OpenRead(filename)))
+			{
+				long length = reader.BaseStream.Length;
+				while (reader.BaseStream.Position != length)
+				{
+					uint r = reader.ReadByte();
+					uint g = reader.ReadByte();
+					uint b = reader.ReadByte();
+
+					r = r << 2 | r >> 4;
+					g = g << 2 | g >> 4;
+					b = b << 2 | b >> 4;
+
+					uint palette = 0xFF000000 | r << 16 | g << 8 | b;
+					list.Add(palette);
+				}
+			}
+			return list.ToArray();
+		}
+
+		public static uint[] GetDefaultPalette()
+		{
+			var palette = new uint[256];
+			for (uint i = 0; i < palette.Length; i++)
+			{
+				palette[i] = 0xFF000000 | i << 16 | i << 8 | i;
+			}
+
+			return palette;
+		}
+
+		public static SpriteFrame[] GetSpriteFrames(string filename)
+		{
+			List<SpriteFrame> list = new List<SpriteFrame>();
+			using (BinaryReader reader = new BinaryReader(File.OpenRead(filename)))
+			{
+				long length = reader.BaseStream.Length;
+				while (reader.BaseStream.Position != length)
+				{
+					SpriteFrame frame = new SpriteFrame
+					{
+						FirstElement = reader.ReadUInt16(),
+						Width = reader.ReadByte(),
+						Height = reader.ReadByte(),
+						Flags = reader.ReadUInt16(),
+						Next = reader.ReadUInt16()
+					};
+					list.Add(frame);
+				}
+			}
+			return list.ToArray();
+		}
+
+		public static SpriteElement[] GetSpriteElements(string filename)
+		{
+			List<SpriteElement> list = new List<SpriteElement>();
+			using (BinaryReader reader = new BinaryReader(File.OpenRead(filename)))
+			{
+				long length = reader.BaseStream.Length;
+				while (reader.BaseStream.Position != length)
+				{
+					SpriteElement element = new SpriteElement
+					{
+						Sprite = (ushort)(reader.ReadUInt16() / 6),
+						XOffset = (short)(reader.ReadInt16() / 2),
+						YOffset = (short)(reader.ReadInt16() / 2),
+						XFlipped = reader.ReadUInt16(),
+						Next = reader.ReadUInt16()
+					};
+					list.Add(element);
+				}
+			}
+			return list.ToArray();
+		}
+
+		public static byte[] GetSoundData(string filename)
+		{
+			return File.ReadAllBytes(filename);
+		}
+
+		public static SoundTab[] GetSoundTabs(string filename)
+		{
+			List<SoundTab> list = new List<SoundTab>();
+			using (BinaryReader reader = new BinaryReader(File.OpenRead(filename)))
+			{
+				long length = reader.BaseStream.Length;
+				while (reader.BaseStream.Position != length)
+				{
+					SoundTab tab = new SoundTab
+					{
+						Name = System.Text.Encoding.ASCII.GetString(reader.ReadBytes(12)).TrimEnd('\0'),
+						Dummy1 = reader.ReadBytes(6), //?
+						Offset = reader.ReadUInt32(),
+						Dummy2 = reader.ReadBytes(4), //?
+						Length = reader.ReadUInt32(),
+						Dummy3 = reader.ReadBytes(2) //?
+					};
+					list.Add(tab);
+				}
+			}
+			return list.ToArray();
+		}
+
+		public static byte[] GetPixels(SpriteTab tab, byte[] data)
+		{
+			uint spriteData = tab.Offset;
+			byte[] pixelData = new byte[tab.Width * tab.Height];
+
+			int currentPixel = 0;
+			for (int i = 0; i < tab.Height; i++)
+			{
+				int runLength = unchecked((sbyte)data[spriteData++]);
+				while (runLength != 0)
+				{
+					if (runLength > 0) // pixel run
+					{
+						for (int j = 0; j < runLength; j++)
+						{
+							pixelData[currentPixel++] = data[spriteData++];
+						}
+					}
+					else if (runLength < 0) // transparent run
+					{
+						for (int j = 0; j < -runLength; j++)
+						{
+							pixelData[currentPixel++] = 255;
+						}
+					}
+
+					runLength = unchecked((sbyte)data[spriteData++]);
+				}
+
+				runLength = (i + 1) * tab.Width - currentPixel;
+				for (int j = 0; j < runLength; j++) //fill the end of the line
+				{
+					pixelData[currentPixel++] = 255;
+				}
+			}
+			return pixelData;
+		}
+
+		public static void DrawToBitmap(DirectBitmap bitmap, byte[] pixelData, uint[] palette, int posx, int posy, int width, int height, bool xflipped)
+		{
+			for (int y = 0; y < height; y++)
+			{
+				for (int x = 0; x < width; x++)
+				{
+					byte colorIndex;
+					if (xflipped)
+					{
+						colorIndex = pixelData[width - 1 - x + y * width];
+					}
+					else
+					{
+						colorIndex = pixelData[x + y * width];
+					}
+
+					if (colorIndex != 255 || (width == 320 && height == 200)) //transparency
+					{
+						bitmap.Bits[posx + x + (posy + y) * bitmap.Width] = palette[colorIndex];
+					}
+				}
+			}
+		}
+
+		public static void DrawSpriteRectangle(DirectBitmap bitmap, SpriteTab tab, int posx, int posy)
+		{
+			for (int x = 0; x < tab.Width; x++)
+			{
+				bitmap.Bits[x + posx + posy * bitmap.Width] = 0xFF00FF00;
+				bitmap.Bits[x + posx + (posy + tab.Height - 1) * bitmap.Width] = 0xFF00FF00;
+			}
+
+			for (int y = 0; y < tab.Height; y++)
+			{
+				bitmap.Bits[posx + (y + posy) * bitmap.Width] = 0xFF00FF00;
+				bitmap.Bits[posx + tab.Width - 1 + (y + posy) * bitmap.Width] = 0xFF00FF00;
+			}
+		}
+
+		public static void DrawSpriteScaled(DirectBitmap bitmap, byte[] pixelData, uint[] palette, int destX, int destY, int srcWidth, int srcHeight,
+			int offsetX, int offsetY, int spriteWidth, int spriteHeight, bool xflipped)
+		{
+			if (srcWidth <= TileSize && srcHeight <= TileSize) //does it fit?
+			{
+				DrawToBitmap(bitmap, pixelData, palette, destX + offsetX, destY + offsetY, spriteWidth, spriteHeight, xflipped);
+			}
+			else
+			{
+				int scale = Math.Max(srcWidth, srcHeight); //take biggest side
+				int destWidth = srcWidth * TileSize / scale;
+				int destHeight = srcHeight * TileSize / scale;
+
+				if (destWidth > 0 && destHeight > 0)
+				{
+					DrawToBitmapScaled();
+
+					void DrawToBitmapScaled()
+					{
+						for (int y = 0; y < destHeight; y++)
+						{
+							int scaleY = y * srcHeight / destHeight;
+							if (scaleY >= offsetY && scaleY < (offsetY + spriteHeight))
+							{
+								for (int x = 0; x < destWidth; x++)
+								{
+									int scaleX = x * srcWidth / destWidth;
+									if (scaleX >= offsetX && scaleX < (offsetX + spriteWidth))
+									{
+										int srcX = scaleX - offsetX;
+										int srcY = scaleY - offsetY;
+
+										byte colorIndex;
+										if (xflipped)
+										{
+											colorIndex = pixelData[spriteWidth - 1 - srcX + srcY * spriteWidth];
+										}
+										else
+										{
+											colorIndex = pixelData[srcX + srcY * spriteWidth];
+										}
+
+										if (colorIndex != 255 || (destWidth == 320 && destHeight == 200)) //transparency
+										{
+											bitmap.Bits[destX + x + (destY + y) * bitmap.Width] = palette[colorIndex];
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		public static void ClearSprite(DirectBitmap bitmap, int posX, int posY)
+		{
+			for (int y = 0; y < TileSize; y++)
+			{
+				for (int x = 0; x < TileSize; x++)
+				{
+					bitmap.Bits[posX + x + (posY + y) * bitmap.Width] = 0;
+				}
+			}
+		}
+	}
+}
